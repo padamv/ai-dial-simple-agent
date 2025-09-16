@@ -3,12 +3,9 @@ from typing import Any
 
 import requests
 
-from task._constants import WEB_SEARCH, SIMPLE_CALCULATOR, NASA_IMG_STEALER
 from task.models.message import Message
 from task.models.role import Role
-from task.tools.calculator import CalculatorTool
-from task.tools.nasa.nasa_image_stealler import NasaImageStealerTool
-from task.tools.web_search import WebSearchTool
+from task.tools.base import BaseTool
 
 
 class DialClient:
@@ -18,34 +15,35 @@ class DialClient:
             endpoint: str,
             deployment_name: str,
             api_key: str,
-            tools: list[dict[str, Any]] | None = None
+            tools: list[BaseTool] | None = None
     ):
         if not api_key or api_key.strip() == "":
             raise ValueError("API key cannot be null or empty")
 
-        self._endpoint = endpoint.format(model=deployment_name)
-        self._api_key = api_key
-        self._tools = tools or []
+        self.__endpoint = f"{endpoint}/openai/deployments/{deployment_name}/chat/completions"
+        self.__api_key = api_key
+        self.__tools_dict: dict[str, BaseTool] = {tool.name: tool for tool in tools} or {}
+        self.__tools_schemas: list[str]= [tool.schema for tool in tools] or []
 
-        print(self._endpoint)
-        print(json.dumps(self._tools, indent=4))
+        print(self.__endpoint)
+        print(json.dumps(self.__tools_schemas, indent=4))
 
 
     def get_completion(self, messages: list[Message], print_request: bool = True) -> Message:
         headers = {
-            "api-key": self._api_key,
+            "api-key": self.__api_key,
             "Content-Type": "application/json"
         }
         request_data = {
             "messages": [msg.to_dict() for msg in messages],
-            "tools": self._tools,
+            "tools": self.__tools_schemas,
         }
 
         if print_request:
-            print(self._endpoint)
+            print(self.__endpoint)
             print("REQUEST:", json.dumps({"messages": [msg.to_dict() for msg in messages]}, indent=2))
 
-        response = requests.post(url=self._endpoint, headers=headers, json=request_data)
+        response = requests.post(url=self.__endpoint, headers=headers, json=request_data)
 
         if response.status_code == 200:
             data = response.json()
@@ -104,11 +102,8 @@ class DialClient:
         return tool_messages
 
     def _call_tool(self, function_name: str, arguments: dict[str, Any]) -> str:
-        if function_name == SIMPLE_CALCULATOR:
-            return CalculatorTool().execute(arguments)
-        elif function_name == NASA_IMG_STEALER:
-            return NasaImageStealerTool(self._api_key).execute(arguments)
-        elif function_name == WEB_SEARCH:
-            return WebSearchTool(self._api_key).execute(arguments)
+        tool = self.__tools_dict.get(function_name)
+        if tool:
+            return tool.execute(arguments)
 
         return f"Unknown function: {function_name}"
